@@ -13,6 +13,7 @@ eV_to_1_by_m = pc['electron volt-inverse meter relationship'][0]
 eV_to_1_by_km = eV_to_1_by_m * 1e3
 one_by_cm3_to_eV3 = (1.973e-5) ** 3
 R_sol = 6.9634e8 * eV_to_1_by_m   # solar radius in eV^-1
+R_earth = 1.496e11 * eV_to_1_by_m  # 1 AU in eV^-1
 
 # Vacuum Parameters
 del_m2_v = 7.1e-5     
@@ -38,7 +39,10 @@ def theta_eff(del_m2, theta, A_cc):
 
 @njit
 def N_e(r):
-    return 245*N_A*np.exp(-r*10.45/R_sol)*one_by_cm3_to_eV3
+    if r <= R_sol:
+        return 245*N_A*np.exp(-r*10.45/R_sol)*one_by_cm3_to_eV3
+    else:
+        return 0.0
 
 @njit
 def k(N, beta, tau):
@@ -52,15 +56,17 @@ def A(E, N, del_m2_m, theta_m):
 def B(E, del_m2_m, theta_m):
     return del_m2_m*np.sin(2*theta_m)/(4*E)
 
-def solar_solver(E, beta, tau, del_m2, theta, n_slabs=100000, r_i=0.0, r_f=1.0):
-    E = E*1e6    
+def solar_solver(E, beta, tau, del_m2, theta, n_slabs=1000000, r_i=0.0, r_f=None):
+    if r_f is None:
+        r_f = R_earth / R_sol
+    E = E*1e6
     dx = (r_f - r_i) * R_sol / n_slabs
     r_vals = np.linspace(r_i + dx/(2*R_sol), r_f - dx/(2*R_sol), n_slabs)
-    psi = np.array([0.5, 0.0, 0.0])
+    psi = np.array([1.0, 0.0, 0.0])
     Pee = np.zeros(n_slabs)
 
     for i in range(n_slabs):
-        r = r_vals[i]*R_sol
+        r = r_vals[i]*R_sol  # Convert solar radius units to eV^-1
         N = N_e(r)
         A_m = A_cc(N, E)
         del_m2_m = del_m2_eff(del_m2, theta, A_m)
@@ -74,7 +80,7 @@ def solar_solver(E, beta, tau, del_m2, theta, n_slabs=100000, r_i=0.0, r_f=1.0):
             [-B_E,  A_r,   k_r]])
         U = expm(-2 * M * dx)
         psi = U @ psi
-        Pee[i] = psi[0] + 0.5
+        Pee[i] = (psi[0] + 1)*0.5
     return r_vals, Pee
 
 def avg_Pee(beta, E_vals, tau, n_jobs=-1):
@@ -93,13 +99,13 @@ def final_prob(beta_values, E_vals, tau, n_jobs=-1):
     return results
 
 # Implementation
-beta_vals = [0,0.02,0.04,0.06]
+beta_vals = [0,0.05,0.1]
 E_vals = np.logspace(-2, np.log10(30), 200)  # 0.01 to 30 MeV
 tau = 10*eV_to_1_by_km
 results = final_prob(beta_vals, E_vals, tau, n_jobs=-1)
 
 # Plot
-colors = plt.cm.seismic(np.linspace(0, 1, len(results)))
+colors = plt.cm.viridis(np.linspace(0, 1, len(results)))
 linestyles = ['-', '--', ':', '-.']
 plt.figure(figsize=(15, 8))
 for i, (beta, avg_Pee) in enumerate(results.items()):
