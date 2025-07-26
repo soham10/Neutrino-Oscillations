@@ -14,11 +14,7 @@ eV_to_1_by_m = pc['electron volt-inverse meter relationship'][0]
 eV_to_1_by_km = eV_to_1_by_m * 1e3
 one_by_cm3_to_eV3 = (1.973e-5) ** 3
 R_sol = 6.9634e8 * eV_to_1_by_m   # solar radius in eV^-1
-R_earth = 1.496e11 * eV_to_1_by_m  # 1 AU in eV^-1
-
-# ------------------------- Vacuum Parameters ------------------------- #
-del_m2_v = 7.1e-5     
-theta_v = np.arcsin(0.5)                                
+R_earth = 1.496e11 * eV_to_1_by_m  # 1 AU in eV^-1                             
 
 @njit
 def A_cc(n_e, E):
@@ -53,17 +49,15 @@ def A(E, N, del_m2_m, theta_m):
 def B(E, del_m2_m, theta_m):
     return del_m2_m*np.sin(2*theta_m)/(4*E)
 
-def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=None):
-    if r_f is None:
-        r_f = R_earth / R_sol
+def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
     E = E*1e6
-    dx = (r_f - r_i) * R_sol / n_slabs
-    r_vals = np.linspace(r_i + dx/(2*R_sol), r_f - dx/(2*R_sol), n_slabs)
+    dx = (r_f - r_i) * R_earth / n_slabs
+    r_vals = np.linspace(r_i + dx/(2*R_earth), r_f - dx/(2*R_earth), n_slabs)
     psi = np.array([1.0, 0.0, 0.0])
     Pee = np.zeros(n_slabs)
 
     for i in range(n_slabs):
-        r = r_vals[i]*R_sol
+        r = r_vals[i]*R_earth
         N = N_e(r)
         A_m = A_cc(N, E)
         del_m2_m = del_m2_eff(del_m2, theta, A_m)
@@ -81,7 +75,7 @@ def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=None):
     return r_vals, Pee
 
 
-def solar_solver_point(E, beta, tau, del_m2, theta):
+def avg_Pee(E, beta, tau, del_m2, theta):
     r_frac, Pee_profile = solar_solver(E, beta, tau, del_m2, theta)
     mask = (r_frac >= 0.9)
     return np.mean(Pee_profile[mask])
@@ -89,36 +83,32 @@ def solar_solver_point(E, beta, tau, del_m2, theta):
 def chi_sq(exp, th, sigma):
     return np.sum(((exp - th) / sigma) ** 2)
 
-def compute_chi2_grid_parallel(dm2_grid, tan2theta_grid, E_vals, data_probability, data_sigma, beta, tau):
+def compute_chi2(dm2_grid, tan2theta_grid, E_vals, data_probability, data_sigma, beta, tau):
+    param_list = [(dm2, tan2theta) for dm2 in dm2_grid for tan2theta in tan2theta_grid]
     def calc_chi2_point(dm2, tan2theta):
         theta = np.arctan(np.sqrt(tan2theta))
-        probs = [solar_solver_point(E, beta, tau, dm2, theta) for E in E_vals]
+        probs = [avg_Pee(E, beta, tau, dm2, theta) for E in E_vals]
         return chi_sq(data_probability, probs, data_sigma)
-
-    chi2_grid = Parallel(n_jobs=-1)(
-        delayed(calc_chi2_point)(dm2, tan2theta) 
-        for dm2 in tqdm(dm2_grid, desc="Δm² Grid") 
-        for tan2theta in tan2theta_grid
+    results = Parallel(n_jobs=-1)(
+        delayed(calc_chi2_point)(dm2, tan2theta) for dm2, tan2theta in tqdm(param_list, desc="Calculating Grid", dynamic_ncols=True, unit='pt')
     )
-
-    chi2_grid_arr = np.array(chi2_grid).reshape(len(dm2_grid), len(tan2theta_grid))
-    return chi2_grid_arr
+    return np.array(results).reshape(len(dm2_grid), len(tan2theta_grid))
 
 # ------------------------- Load Experimental Data ------------------------- #
-data = pd.read_csv('prob.csv')
+data = pd.read_csv('prob copy.csv')
 E_vals = data['E'].values
-probs = data['E'].values
+probs = data['Day'].values
 tau = 10 * eV_to_1_by_km
 beta = 0
 
-data['sigma'] = np.std(probs) + 0.02*data['Day']
+data['sigma'] = np.std(E_vals)
 
 
 # ------------------------- Chi2 Grid Search ------------------------- #
 dm2_grid = np.logspace(-8, -3, 10)
 tan2theta_grid = np.logspace(-4, 1, 10)
 
-chi2_grid = compute_chi2_grid_parallel(
+chi2_grid = compute_chi2(
     dm2_grid,
     tan2theta_grid,
     E_vals,
@@ -138,35 +128,18 @@ print(f"Best-fit Δm²: {best_dm2:.3e} eV²")
 print(f"Best-fit tan²θ: {best_tan2theta:.3f}")
 
 # ------------------------- Plot Contour with Confidence Levels ------------------------- #
-plt.figure(figsize=(8, 6))
+X, Y = np.meshgrid(tan2theta_grid, dm2_grid)
+Z = chi2_grid
 
-# Filled chi2 contour
-contour = plt.contourf(tan2theta_grid, dm2_grid, chi2_grid.T, levels=50, cmap='viridis')
-
-# Confidence level contour lines
-delta_chi2 = [2.30, 6.18, 11.83]  # 1σ, 2σ, 3σ
-confidence_levels = [min_chi2 + d for d in delta_chi2]
-lines = plt.contour(tan2theta_grid, dm2_grid, chi2_grid.T,
-                    levels=confidence_levels,
-                    colors=['white', 'cyan', 'red'],
-                    linestyles=['--', '-.', ':'])
-
-# Annotate contours
-fmt = {}
-for l, s in zip(lines.levels, ['1σ', '2σ', '3σ']):
-    fmt[l] = s
-plt.clabel(lines, inline=True, fontsize=10, fmt=fmt)
-
-# Mark best-fit point
-plt.scatter(best_tan2theta, best_dm2, color='black', marker='x', label='Best Fit')
-
-# Log scales and labels
-plt.xscale('log')
-plt.yscale('log')
-plt.xlabel(r'$\tan^2 \theta$')
-plt.ylabel(r'$\Delta m^2$ (eV$^2$)')
-plt.title(r'$\chi^2$ Contour Map with Confidence Intervals')
-plt.colorbar(contour, label=r'$\chi^2$')
-plt.legend()
+fig, ax = plt.subplots(figsize=(7, 10))
+cf = ax.contourf(X, Y, Z, levels=[0.4, 1], colors=['turquoise'])
+ax.contour(X, Y, Z, levels=[0.7], colors='red', linewidths=2.5)       # solid
+ax.contour(X, Y, Z, levels=[0.8], colors='red', linestyles='--')      # dashed
+ax.contour(X, Y, Z, levels=[0.9], colors='red', linestyles=':')       # dotted
+ax.set_xscale('log')
+ax.set_yscale('log')
+plt.xlabel(r'$\tan^2 \theta_{12}$', fontsize=12, color='orange')
+plt.ylabel(r'$\Delta m^2_{21}$', fontsize=12, color='brown')
+plt.title(r'\chi^2 \text{Analysis} ', fontsize=16, color='red', pad=24)
 plt.tight_layout()
 plt.show()

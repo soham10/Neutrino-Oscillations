@@ -5,6 +5,7 @@ from scipy.constants import physical_constants as pc
 from numba import njit
 from joblib import Parallel, delayed
 from tqdm import tqdm
+import pandas as pd
 
 # Constants
 G_F = pc['Fermi coupling constant'][0] * 1e-18  # eV^2
@@ -92,28 +93,29 @@ def avg_Pee(beta, E_vals, tau, n_jobs=-1):
     avg_Pee = Parallel(n_jobs=n_jobs)(delayed(probability)(E) for E in tqdm(E_vals, desc=f'β = {beta}'))
     return np.array(avg_Pee)
 
+"""
 def final_prob(beta_values, E_vals, tau, n_jobs=-1):
     results = {}
     for beta in beta_values:
         results[beta] = avg_Pee(beta, E_vals, tau, n_jobs)
     return results
 
+"""
 # Implementation
-beta_vals = [0,0.05,0.1]
-E_vals = np.logspace(-2, np.log10(30), 200)  # 0.01 to 30 MeV
+beta = 0
+data = pd.read_csv('lambda.csv')
+E_vals = data['energy']
 tau = 10*eV_to_1_by_km
-results = final_prob(beta_vals, E_vals, tau, n_jobs=-1)
+results = avg_Pee(beta, E_vals, tau, n_jobs=-1)
+results_df = pd.DataFrame({
+    'energy': E_vals,
+    'results': results
+})
+results_df.to_csv('Th Probability.csv', index = False)
 
 # Plot
-colors = plt.cm.viridis(np.linspace(0, 1, len(results)))
-linestyles = ['-', '--', ':', '-.']
 plt.figure(figsize=(15, 8))
-for i, (beta, avg_Pee) in enumerate(results.items()):
-    color = colors[i]
-    linestyle = linestyles[i % len(linestyles)]
-    plt.plot(E_vals, avg_Pee, label=f'β = {beta}', color=color, linestyle=linestyle)
-
-plt.xscale('log')
+plt.plot(E_vals, results, label=f'β = {beta}', color='red')
 plt.xlabel("Energy (MeV)", fontsize=14)
 plt.ylabel(r"$P_{ee}$", fontsize=14)
 plt.title(r"Electron Neutrino Survival for Varying $\beta$ with Stochastic Fluctuations", fontsize=16)
