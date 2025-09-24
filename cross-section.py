@@ -36,7 +36,7 @@ def sigma(Ev):
             return R(T, Tp) * dsigma_dT(Tp, Ev)
         inner_res, _ = quad(integrand_inner, T_min, T_max)
         return inner_res
-    outer_res, _ = quad(integrand, T_min, T_max)
+    outer_res, _ = quad(integrand, 0, Ev)
     return outer_res
 
 Ev_arr = pd.read_csv('lambda.csv')['energy']  # Neutrino energy

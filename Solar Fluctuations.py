@@ -93,14 +93,6 @@ def avg_Pee(beta, E_vals, tau, n_jobs=-1):
     avg_Pee = Parallel(n_jobs=n_jobs)(delayed(probability)(E) for E in tqdm(E_vals, desc=f'β = {beta}'))
     return np.array(avg_Pee)
 
-"""
-def final_prob(beta_values, E_vals, tau, n_jobs=-1):
-    results = {}
-    for beta in beta_values:
-        results[beta] = avg_Pee(beta, E_vals, tau, n_jobs)
-    return results
-
-"""
 # Implementation
 beta = 0
 data = pd.read_csv('lambda.csv')
@@ -111,7 +103,7 @@ results_df = pd.DataFrame({
     'energy': E_vals,
     'results': results
 })
-results_df.to_csv('Th Probability.csv', index = False)
+results_df.to_csv('Theory Probability[{beta}].csv', index = False)
 
 # Plot
 plt.figure(figsize=(15, 8))

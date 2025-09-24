@@ -49,7 +49,7 @@ def A(E, N, del_m2_m, theta_m):
 def B(E, del_m2_m, theta_m):
     return del_m2_m*np.sin(2*theta_m)/(4*E)
 
-def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
+def solar_solver(E, beta, tau, del_m2, theta, n_slabs=100000, r_i=0.0, r_f=1.0):
     E = E*1e6
     dx = (r_f - r_i) * R_earth / n_slabs
     r_vals = np.linspace(r_i + dx/(2*R_earth), r_f - dx/(2*R_earth), n_slabs)
@@ -77,7 +77,7 @@ def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
 
 def avg_Pee(E, beta, tau, del_m2, theta):
     r_frac, Pee_profile = solar_solver(E, beta, tau, del_m2, theta)
-    mask = (r_frac >= 0.9)
+    mask = (r_frac >= 0.95)
     return np.mean(Pee_profile[mask])
 
 def chi_sq(exp, th, sigma):
@@ -95,51 +95,81 @@ def compute_chi2(dm2_grid, tan2theta_grid, E_vals, data_probability, data_sigma,
     return np.array(results).reshape(len(dm2_grid), len(tan2theta_grid))
 
 # ------------------------- Load Experimental Data ------------------------- #
-data = pd.read_csv('prob copy.csv')
+data = pd.read_csv('supercomp/prob.csv')
 E_vals = data['E'].values
 probs = data['Day'].values
-tau = 10 * eV_to_1_by_km
-beta = 0
-
-data['sigma'] = np.std(E_vals)
-
+tau = 10*eV_to_1_by_km
+sigma = np.std(np.asarray(probs, dtype=float))
+data['sigma'] = sigma* np.ones_like(probs)
 
 # ------------------------- Chi2 Grid Search ------------------------- #
-dm2_grid = np.logspace(-8, -3, 10)
-tan2theta_grid = np.logspace(-4, 1, 10)
+dm2_grid = np.logspace(-5, -3, 10)
+tan2theta_grid = np.logspace(-1, 0, 10)
 
-chi2_grid = compute_chi2(
-    dm2_grid,
-    tan2theta_grid,
-    E_vals,
-    data['Day'].values,
-    data['sigma'].values,
-    beta,
-    tau
-)
-# ------------------------- Best-Fit Parameters ------------------------- #
-min_idx = np.unravel_index(np.argmin(chi2_grid), chi2_grid.shape)
-min_chi2 = chi2_grid[min_idx]
-best_dm2 = dm2_grid[min_idx[0]]
-best_tan2theta = tan2theta_grid[min_idx[1]]
+# ------------------------- Beta Variation Setup ------------------------- #
+beta_list = [0, 0.04,0.08]  # Add more β values as desired
+colors = ['cyan', 'green', 'blue', 'orange', 'purple']
+linestyles = ['solid', 'dashed', 'dotted', 'dashdot', 'dotted']
 
-print(f"\nMinimum χ²: {min_chi2:.3f}")
-print(f"Best-fit Δm²: {best_dm2:.3e} eV²")
-print(f"Best-fit tan²θ: {best_tan2theta:.3f}")
+min_info = []  
+plt.figure(figsize=(10, 7))
 
-# ------------------------- Plot Contour with Confidence Levels ------------------------- #
-X, Y = np.meshgrid(tan2theta_grid, dm2_grid)
-Z = chi2_grid
+for i, beta in enumerate(beta_list):
+    print(f"\nProcessing for β = {beta}")
+    chi2_grid = compute_chi2(
+        dm2_grid,
+        tan2theta_grid,
+        E_vals,
+        data['Day'].values,
+        data['sigma'].values,
+        beta,
+        tau
+    )
 
-fig, ax = plt.subplots(figsize=(7, 10))
-cf = ax.contourf(X, Y, Z, levels=[0.4, 1], colors=['turquoise'])
-ax.contour(X, Y, Z, levels=[0.7], colors='red', linewidths=2.5)       # solid
-ax.contour(X, Y, Z, levels=[0.8], colors='red', linestyles='--')      # dashed
-ax.contour(X, Y, Z, levels=[0.9], colors='red', linestyles=':')       # dotted
-ax.set_xscale('log')
-ax.set_yscale('log')
-plt.xlabel(r'$\tan^2 \theta_{12}$', fontsize=12, color='orange')
-plt.ylabel(r'$\Delta m^2_{21}$', fontsize=12, color='brown')
-plt.title(r'\chi^2 \text{Analysis} ', fontsize=16, color='red', pad=24)
+    # Best-fit extraction
+    min_idx = np.unravel_index(np.argmin(chi2_grid), chi2_grid.shape)
+    min_chi2 = chi2_grid[min_idx]
+    best_dm2 = dm2_grid[min_idx[0]]
+    best_tan2theta = tan2theta_grid[min_idx[1]]
+
+    min_info.append((beta, min_chi2, best_dm2, best_tan2theta))
+
+    # Filled χ² contours: fill up to 1σ (Δχ² = 2.30) with the color for this beta
+    cf = plt.contourf(
+        tan2theta_grid, dm2_grid, chi2_grid,
+        levels=[min_chi2, min_chi2 + 2.30],
+        colors=[colors[i % len(colors)]],
+        alpha=0.4
+    )
+
+    # Plot confidence contours: Δχ² = 2.30 (1σ), 6.18 (2σ), 11.83 (3σ)
+    confidence_levels = [min_chi2 + 2.30, min_chi2 + 6.18, min_chi2 + 11.83]
+    for j, delta in enumerate(confidence_levels):
+        plt.contour(
+            tan2theta_grid, dm2_grid, chi2_grid,
+            levels=[delta],
+            colors=[colors[i % len(colors)]],
+            linestyles=[linestyles[j % len(linestyles)]],
+            linewidths=2
+        )
+
+    # Mark best-fit point
+    plt.scatter(best_tan2theta, best_dm2, marker='x', s=70, color=colors[i % len(colors)],
+                label=f'Best Fit β={beta:.3f}')
+
+plt.xscale('log')
+plt.yscale('log')
+plt.xlabel(r'$\tan^2 \theta$')
+plt.ylabel(r'$\Delta m^2$ (eV$^2$)')
+plt.title(r'$\chi^2$ minimization contours for varying $\beta$')
+plt.grid(True, which='both', linestyle=':', linewidth=0.5)
+plt.colorbar(cf, label=r'$\chi^2$')
+plt.legend()
 plt.tight_layout()
 plt.show()
+plt.savefig('chi2_contours.png')
+
+# Save the results
+results_df = pd.DataFrame(min_info, columns=['beta', 'min_chi2', 'best_dm2', 'best_tan2theta'])
+results_df.to_csv('chi2_results.csv', index=False)
+print("Chi-squared results saved to 'chi2_results.csv'.")
