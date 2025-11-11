@@ -5,14 +5,13 @@ from scipy.interpolate import interp1d
 import pandas as pd
 
 # -------------- Lambda (8B spectrum) --------------
-lambda_df = pd.read_csv('Finall/lambda.csv')
+lambda_df = pd.read_csv('lambda.csv')
 lambda_interp = interp1d(lambda_df['energy'].values, lambda_df['lambda'].values, 
                          bounds_error=False, fill_value=0.0)
 
 # ---- Constants and cross section functions ----
 G_F = 1.1663787e-23  # eV^2
 m_e = 0.510998950    # MeV
-eV_to_cm = 1.23981e-4
 
 def rho_NC_e():
     return 1.0126  # ±0.0016
@@ -72,7 +71,7 @@ def TMax(Enu):
 # SK detector response function
 def s_SK(T_prime):
     """Width of the Gaussian response function in MeV"""
-    return 0.47 * np.sqrt(T_prime)
+    return -0.0839 + 0.349 * np.sqrt(T_prime) + 0.0397 * T_prime
 
 def R_SK(T, T_prime):
     s = s_SK(T_prime)
@@ -118,7 +117,7 @@ def compute_total_convolved_sigma(Enu, T_center, bin_width=0.5, is_nu_e=True):
 output_total = []
 
 # Load Te bin centers from plot-data.csv
-plot_data = pd.read_csv("Finall/plot-data.csv")
+plot_data = pd.read_csv("plot-data.csv")
 Te_bin_centers = plot_data['Recoil energy(MeV)'].values
 
 # Use neutrino energies from lambda.csv file
@@ -157,5 +156,5 @@ plt.grid(True, alpha=0.3)
 plt.show()
 
 # Save results
-np.savetxt("Finall/sigma_vs_Enu_Te_bins_SK.csv", output_total, 
+np.savetxt("sigma_vs_Enu_Te_bins_SK.csv", output_total, 
            delimiter=",", header="E_nu,Te_center,sigma_e,sigma_x", comments='')

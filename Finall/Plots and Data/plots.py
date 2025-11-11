@@ -11,8 +11,8 @@ plt.rcParams['axes.labelsize'] = 14
 plt.rcParams['axes.titlesize'] = 16
 
 # Load chi-squared data from CSV
-data = pd.read_csv('Plots and Data/chi2_results0.05.csv')
-
+data = pd.read_csv('chi2_results0.1.csv')
+beta = 0.1
 # Get unique values for grid dimensions
 dm2_unique = np.sort(data['dm2'].unique())
 tan2theta_unique = np.sort(data['tan2theta'].unique())
@@ -30,6 +30,7 @@ min_idx = np.unravel_index(np.argmin(chi2_grid), chi2_grid.shape)
 min_tan2theta = tan2theta_unique[min_idx[0]]
 min_dm2 = dm2_unique[min_idx[1]]
 
+print(f'min_chi2: {min_chi2}, min_tan2theta: {min_tan2theta}, min_dm2: {min_dm2}')
 # Create figure with appropriate size
 fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 
@@ -56,7 +57,7 @@ plt.text(min_tan2theta + 0.05, min_dm2, f'$\\chi^2_{{min}} = {min_chi2:.2f}$',
 # Set axis properties
 ax.set_xlabel(r'$\tan^2\theta_{12}$', fontsize=14)
 ax.set_ylabel(r'$\Delta m^2_{21}$ ($\times 10^{-5}$ eV$^2$)', fontsize=14)
-ax.set_title(r'$2 \times 2$ Solar Neutrino Oscillations with Fluctuations', fontsize=16, pad=20)
+ax.set_title(f'Solar Neutrino Oscillations with beta = {beta}', fontsize=16, pad=20)
 
 # Format y-axis to show scientific notation
 ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x*1e5:.0f}'))
