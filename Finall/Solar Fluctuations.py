@@ -38,7 +38,7 @@ def A(E, N, del_m2, theta):
 def B(E, del_m2, theta):
     return del_m2*np.sin(2*theta)/(4*E)
 
-def solar_solver(E, beta, tau, del_m2, theta, n_slabs=40000, r_i=0.0, r_f=1.0):
+def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
     E = E * 1e6  # MeV to eV
     dx = (r_f - r_i) * R_earth / n_slabs
     r_vals = np.linspace(r_i, r_f, n_slabs)
@@ -68,10 +68,10 @@ def avg_Pee(beta, E_vals, tau, n_jobs=-1):
     return np.array(avg_Pee)
 
 # Implementation
-beta_values = [0.0, 0.03, 0.05, 0.1]
-E_vals = np.logspace(np.log10(0.01), np.log10(100), 100)
+E_vals = np.linspace(0.1, 20, 100)  # MeV
+beta_values = [0.0]
 tau = 10*eV_to_1_by_m*1000
-mass = del_m2_v/E_vals
+
 # Plot
 plt.figure(figsize=(15, 8))
 colors = ['red', 'blue', 'green', 'orange', 'purple']
@@ -84,7 +84,7 @@ for idx, beta in enumerate(beta_values):
     })
     results_df.to_csv(f'Theory Probability[{beta}].csv', index = False)
     
-    plt.plot(mass, results, label=f'β = {beta}', color=colors[idx])
+    plt.plot(E_vals, results, label=f'β = {beta}', color=colors[idx])
 
 plt.xlabel("Energy (MeV)", fontsize=14)
 plt.ylabel(r"$P_{ee}$", fontsize=14)

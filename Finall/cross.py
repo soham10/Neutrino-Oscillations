@@ -80,14 +80,14 @@ def R_SK(T, T_prime):
     return (1 / (np.sqrt(2*np.pi) * s)) * np.exp(-0.5 * ((T - T_prime) / s)**2)
 
 # Function to compute the total convolved cross section for a given neutrino energy
-def compute_total_convolved_sigma(Enu, T_center, bin_width=0.5, is_nu_e=True):
+def compute_total_convolved_sigma(Enu, T_center, bin_width, is_nu_e=True):
     """
     Compute total detector-convolved cross section for fixed Enu and Te bin
     T_center: center of the Te bin
     bin_width: width of Te bin (default 0.5 MeV)
     """
-    T_min = T_center - bin_width/2  # T^i - 0.25
-    T_max = T_center + bin_width/2  # T^i + 0.25
+    T_min = T_center - bin_width/2  
+    T_max = T_center + bin_width/2 
     
     # Maximum kinetic energy that electron can have (kinematic limit)
     T_prime_max = TMax(Enu)
@@ -119,6 +119,7 @@ output_total = []
 # Load Te bin centers from plot-data.csv
 plot_data = pd.read_csv("plot-data.csv")
 Te_bin_centers = plot_data['Recoil energy(MeV)'].values
+sigma_energies = plot_data['sigma_energy'].values
 
 # Use neutrino energies from lambda.csv file
 Enu_vals = lambda_df['energy'].values
@@ -127,12 +128,14 @@ print("Computing detector-convolved cross sections...")
 print(f"Using {len(Enu_vals)} neutrino energies from lambda.csv")
 print(f"Using {len(Te_bin_centers)} Te bins from plot-data.csv")
 
-for i_te, Te_center in enumerate(Te_bin_centers):
-    print(f"Processing Te bin {i_te+1}/{len(Te_bin_centers)}: Te = {Te_center} MeV")
+for i_te, (Te_center, sigma_energy) in enumerate(zip(Te_bin_centers, sigma_energies)):
+    # Use 2*sigma_energy as the full bin width (±sigma_energy around center)
+    bin_width = 2.0 * sigma_energy
+    print(f"Processing Te bin {i_te+1}/{len(Te_bin_centers)}: Te = {Te_center} MeV, bin_width = {bin_width} MeV")
     
     for Enu in Enu_vals:
-        sigma_e = compute_total_convolved_sigma(Enu, Te_center, bin_width=0.5, is_nu_e=True)
-        sigma_x = compute_total_convolved_sigma(Enu, Te_center, bin_width=0.5, is_nu_e=False)
+        sigma_e = compute_total_convolved_sigma(Enu, Te_center, bin_width=bin_width, is_nu_e=True)
+        sigma_x = compute_total_convolved_sigma(Enu, Te_center, bin_width=bin_width, is_nu_e=False)
         output_total.append([Enu, Te_center, sigma_e, sigma_x])
 
 output_total = np.array(output_total)
@@ -156,5 +159,5 @@ plt.grid(True, alpha=0.3)
 plt.show()
 
 # Save results
-np.savetxt("sigma_vs_Enu_Te_bins_SK.csv", output_total, 
+np.savetxt("sigma.csv", output_total, 
            delimiter=",", header="E_nu,Te_center,sigma_e,sigma_x", comments='')

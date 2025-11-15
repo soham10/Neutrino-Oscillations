@@ -17,7 +17,7 @@ R_earth = 1.496e11 * eV_to_1_by_m  # 1 AU in eV^-1
 # SK settings
 fiducial_mass = 1e9 # g
 N_e_tgt = 10*fiducial_mass*N_A/18  # number of target electrons
-phi_B0 = 5.25e6  # cm^-2 s^-1, https://arxiv.org/pdf/hep-ex/0508053
+phi_B0 = 5.65e6  # cm^-2 s^-1, https://arxiv.org/pdf/hep-ex/0508053
 phi_hep = 7.88e3  # cm^-2 s^-1
 
 # Load detector-corrected cross sections σ(E_ν, Te)
@@ -39,13 +39,12 @@ lambda_val_B = np.array(lambda_df['lambda'].values, dtype=float)
 hep_df = pd.read_csv('hep.csv')
 hep_E = np.array(hep_df['energy'].values, dtype=float)
 lambda_val_hep = np.array(hep_df['lambda'].values, dtype=float)
+
 # Get unique energy and Te values
 E_nu_vals = np.unique(E_nu_vals_grid)
 Te_bin_centers = np.unique(Te_vals_grid)
 
-# Load Te values from plot-data.csv
-plot_data = pd.read_csv("plot-data.csv")
-Te_values_exp = plot_data['Recoil energy(MeV)'].values
+print(f"Loaded cross sections for {len(E_nu_vals)} energies and {len(Te_bin_centers)} Te bins")
 
 # Create combined spectrum
 lambda_interp_hep_on_grid = np.interp(E_nu_vals, hep_E, lambda_val_hep, left=0.0, right=0.0)
@@ -105,7 +104,7 @@ def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
 
 def avg_Pee(E, beta, tau, del_m2, theta):
     r_frac, Pee_profile = solar_solver(E, beta, tau, del_m2, theta)
-    mask = (r_frac >= 0.9)  # Reduced from 0.95 to 0.9 for fewer points
+    mask = (r_frac >= 0.9)
     return np.mean(Pee_profile[mask])
 
 # Oscillation parameters
@@ -113,6 +112,10 @@ beta = 0.0 # Turbulence Parameter
 tau = 10*eV_to_1_by_m*1000
 del_m2 = 7.6e-5  # eV2
 theta = np.arctan(np.sqrt(0.46))    # radians
+
+# Load Te values from plot-data.csv
+plot_data = pd.read_csv("plot-data.csv")
+Te_values = plot_data['Recoil energy(MeV)'].values
 
 # Pre-compute oscillation probabilities for all energies
 print("Pre-computing oscillation probabilities...")
@@ -124,6 +127,10 @@ print("Computing rates for each Te bin...")
 
 # Calculate rate for each Te bin
 results = []
+
+# Calculate energy bin width for integration (use per-bin widths, not the global mean)
+dE_nu_array = np.gradient(E_nu_vals)
+print(f"Using energy bin widths dE_nu: min={dE_nu_array.min():.4e} MeV, max={dE_nu_array.max():.4e} MeV")
 
 for Te_center in tqdm(Te_bin_centers, desc="Computing Te rates"):
     total_rate_for_Te = 0.0
@@ -140,10 +147,11 @@ for Te_center in tqdm(Te_bin_centers, desc="Computing Te rates"):
             # Get oscillation probability and spectrum weight
             Pee_val = Pee_values[i_E]
             lambda_val = lambda_combined[i_E]
+            # Rate contribution: φ * λ(Eν) * [σ_e * P_ee + σ_x * (1 - P_ee)] * dEν
             rate_contrib = total_flux * lambda_val * (sigma_e * Pee_val + sigma_x * (1 - Pee_val))
-            rate_contrib *= N_e_tgt * 24 * 3600  # Events/day/22.5kt
+            rate_contrib *= N_e_tgt * 365 * 24 * 3600 * dE_nu_array[i_E]
             
-            total_rate_for_Te += rate_contrib    
+            total_rate_for_Te += rate_contrib
     results.append([Te_center, total_rate_for_Te])
 
 # Convert to array
@@ -151,27 +159,22 @@ rates_vs_Te = np.array(results)
 
 # Save results
 np.savetxt(f'theoretical_rate_vs_Te_SK ({beta}).csv', rates_vs_Te, 
-           delimiter=',', header='Te_MeV,EventRate_per_day_per_0.5MeV', comments='')
+           delimiter=',', header='Te_MeV,EventRate_per_year_per_kt_per_0.5MeV', comments='')
 
 # Load experimental data for comparison if available
 exp_data = np.loadtxt('plot-data.csv', delimiter=',', skiprows=1)
 exp_te = exp_data[:, 0]
 exp_rate = exp_data[:, 1]
-exp_err = exp_data[:, 2] if exp_data.shape[1] > 2 else None
+exp_err = exp_data[:, 3]
 has_exp_data = True
 
 # Plot results
 plt.figure(figsize=(10, 6))
 plt.scatter(rates_vs_Te[:, 0], rates_vs_Te[:, 1], label='Theoretical Rate', color='blue', s=30)    
-if has_exp_data:
-    if exp_err is not None:
-        plt.errorbar(exp_te, exp_rate, xerr=exp_err, fmt='o', label='SK Experimental Data', 
-                    color='red', alpha=0.7, markersize=5)
-    else:
-        plt.plot(exp_te, exp_rate, 'o', label='SK Experimental Data', color='red', markersize=5)
+plt.scatter(exp_te, exp_rate, label='SK Experimental Data', color='red', s=30)
 
 plt.xlabel('Electron Recoil Energy Te (MeV)')
-plt.ylabel('Events/day/kt/0.5MeV')
+plt.ylabel('Events/year/kt/0.5MeV')
 plt.title('Event Rate vs Electron Recoil Energy')
 
 # Add textual information about parameters
@@ -184,5 +187,6 @@ plt.text(0.02, 0.98,
 plt.legend()
 plt.grid(alpha=0.2)
 plt.tight_layout()
+plt.yscale('log')
 plt.savefig(f"event_rate_vs_Te_final ({beta}).png", dpi=300)
 plt.show()
