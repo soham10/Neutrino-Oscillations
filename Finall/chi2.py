@@ -62,7 +62,7 @@ def A(E, N, del_m2, theta):
 def B(E, del_m2, theta):
     return del_m2*np.sin(2*theta)/(4*E)
 
-def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
+def solar_solver(E, beta, tau, del_m2, theta, n_slabs=50000, r_i=0.0, r_f=1.0):
     E = E * 1e6  # MeV to eV
     dx = (r_f - r_i) * R_earth / n_slabs
     r_vals = np.linspace(r_i, r_f, n_slabs)
@@ -88,6 +88,10 @@ def avg_Pee(E, beta, tau, del_m2, theta):
     return np.mean(Pee_profile[mask])
 
 def chi_sq(exp, th, sigma):
+    """
+    Calculate chi-squared: χ² = Σ[(O_i - E_i)² / σ_i²]
+    where O_i = observed (experimental), E_i = expected (theoretical), σ_i = uncertainty
+    """
     return np.sum(((exp - th) / sigma) ** 2)
 
 def compute_chi2_for_rates(dm2_grid, tan2theta_grid, beta=0.0, tau=10*eV_to_1_by_m*1000):
@@ -110,6 +114,10 @@ def compute_chi2_for_rates(dm2_grid, tan2theta_grid, beta=0.0, tau=10*eV_to_1_by
     print(f"Energy range: {exp_te.min():.2f} - {exp_te.max():.2f} MeV")
     print(f"Using combined statistical + systematic uncertainties")
     
+    # Calculate energy bin widths for integration (match Rates.py)
+    dE_nu_array = np.gradient(E_nu_vals)
+    print(f"Using energy bin widths dE_nu: min={dE_nu_array.min():.4e} MeV, max={dE_nu_array.max():.4e} MeV")
+    
     # Create parameter list
     param_list = [(dm2, tan2theta) for dm2 in dm2_grid for tan2theta in tan2theta_grid]
     
@@ -129,16 +137,17 @@ def compute_chi2_for_rates(dm2_grid, tan2theta_grid, beta=0.0, tau=10*eV_to_1_by
         for j, E_nu in enumerate(tqdm(E_nu_vals, desc="Computing Pee", leave=False)):
             Pee_values[j] = avg_Pee(E_nu, beta, tau, dm2, theta)
         
-        # Calculate theoretical rates for experimental Te bins using Rates.py logic
+        # Calculate theoretical rates for each experimental Te bin (match Rates.py logic)
         theo_rates = np.zeros_like(exp_te)
         
         for k, Te_exp in enumerate(tqdm(exp_te, desc="Computing rates for Te bins", leave=False)):
             total_rate_for_Te = 0.0
             
-            # Sum over all neutrino energies for this experimental Te bin
+            # Sum over all neutrino energies for this Te bin
             for j, E_nu in enumerate(E_nu_vals):
                 # Find the cross section for this (E_nu, Te_exp) pair
-                mask = (E_nu_vals_grid == E_nu) & (Te_vals_grid == Te_exp)
+                # Match exact Te value from experimental data
+                mask = (E_nu_vals_grid == E_nu) & (np.abs(Te_vals_grid - Te_exp) < 1e-6)
                 
                 if np.any(mask):
                     sigma_e = sigma_e_grid[mask][0]
@@ -148,13 +157,12 @@ def compute_chi2_for_rates(dm2_grid, tan2theta_grid, beta=0.0, tau=10*eV_to_1_by
                     Pee_val = Pee_values[j]
                     lambda_val = lambda_combined[j]
                     
-                    # Calculate rate contribution directly
+                    # Rate contribution: φ * λ(Eν) * [σ_e * P_ee + σ_x * (1 - P_ee)] * dEν
                     rate_contrib = total_flux * lambda_val * (sigma_e * Pee_val + sigma_x * (1 - Pee_val))
-                    rate_contrib *= N_e_tgt * 24 * 3600  # Events/day/22.5kt
+                    rate_contrib *= N_e_tgt * 365 * 24 * 3600 * dE_nu_array[j]  # Events/year/kt/0.5MeV
                     
                     total_rate_for_Te += rate_contrib
             
-            # Do NOT apply efficiency correction - theoretical rates should be raw predictions
             theo_rates[k] = total_rate_for_Te
         
         # Calculate chi-squared using combined uncertainties
@@ -162,15 +170,21 @@ def compute_chi2_for_rates(dm2_grid, tan2theta_grid, beta=0.0, tau=10*eV_to_1_by
         
         results.append(chi2_val)
         
-        # Print progress summary
-        print(f"Completed {i+1}/{len(param_list)} - dm²={dm2:.2e}, tan²θ={tan2theta:.3f}, χ²={chi2_val:.2f}")
+        # Print progress summary with some rate comparisons
+        print(f"\nCompleted {i+1}/{len(param_list)} - dm²={dm2:.2e}, tan²θ={tan2theta:.3f}, χ²={chi2_val:.2f}")
+        print(f"  Sample rates - Exp vs Theory (first 3 bins):")
+        for idx in range(min(3, len(exp_te))):
+            print(f"    Te={exp_te[idx]:.2f} MeV: Exp={exp_rate[idx]:.2f} ± {exp_sigma_total[idx]:.2f}, Theory={theo_rates[idx]:.2f}")
     
     return np.array(results).reshape(len(dm2_grid), len(tan2theta_grid))
 
 if __name__ == '__main__':
+    # Load experimental data to get number of data points
+    plot_data = pd.read_csv('plot-data.csv')
+    
     # Define parameter grids
-    dm2_grid = np.logspace(-5, -4, 20)
-    tan2theta_grid = np.logspace(-1, 0, 20)  # tan²θ ranges from 0.1 to 1
+    dm2_grid = np.logspace(-5, -4, 25)
+    tan2theta_grid = np.logspace(-1, 0, 25)  # tan²θ ranges from 0.1 to 1
     
     # Physics parameters - match Rates.py
     beta = 0.0
@@ -185,9 +199,19 @@ if __name__ == '__main__':
     best_tan2theta = tan2theta_grid[min_idx[1]]
     min_chi2 = chi2_grid[min_idx]
     
+    # Calculate degrees of freedom
+    n_data_points = len(plot_data)
+    n_parameters = 2  # dm2 and tan2theta
+    dof = n_data_points - n_parameters
+    reduced_chi2 = min_chi2 / dof
+    
     print(f"\n{'='*60}")
+    print(f"Chi-Squared Fit Results:")
+    print(f"{'='*60}")
     print(f"Best fit: Δm² = {best_dm2:.2e} eV², tan²θ = {best_tan2theta:.3f}")
     print(f"Minimum χ² = {min_chi2:.2f}")
+    print(f"Degrees of freedom = {dof} ({n_data_points} data points - {n_parameters} parameters)")
+    print(f"Reduced χ²/dof = {reduced_chi2:.3f}")
     print(f"{'='*60}")
     
     # Save results
@@ -201,17 +225,26 @@ if __name__ == '__main__':
     plt.figure(figsize=(10, 8))
     X, Y = np.meshgrid(tan2theta_grid, dm2_grid)
     
+    # Calculate confidence level contours for 2 DOF (Δχ² values)
+    # 1σ (68.27%): Δχ² = 2.30
+    # 2σ (95.45%): Δχ² = 6.18  
+    # 3σ (99.73%): Δχ² = 11.83
+    levels = [min_chi2 + 2.30, min_chi2 + 6.18, min_chi2 + 11.83]
+    level_labels = ['1σ (68%)', '2σ (95%)', '3σ (99.7%)']
+    
     # Plot filled contours
-    levels = [min_chi2 + 2.30, min_chi2 + 6.18, min_chi2 + 11.83]  # 1σ, 2σ, 3σ for 2 DOF
     contour = plt.contourf(X, Y, chi2_grid, levels=20, cmap='viridis')
     plt.colorbar(contour, label='χ²')
     
-    # Plot contour lines
+    # Plot confidence level contour lines
     CS = plt.contour(X, Y, chi2_grid, levels=levels, colors='white', linewidths=2)
-    plt.clabel(CS, inline=True, fontsize=10, fmt='χ²=%.1f')
+    # Manual legend for contour levels
+    for level, label in zip(levels, level_labels):
+        plt.plot([], [], 'w-', linewidth=2, label=f'{label}: χ²={level:.1f}')
     
     # Mark best fit point
-    plt.plot(best_tan2theta, best_dm2, 'r*', markersize=20, label=f'Best fit: χ²={min_chi2:.2f}')
+    plt.plot(best_tan2theta, best_dm2, 'r*', markersize=20, 
+             label=f'Best fit: χ²={min_chi2:.2f}, χ²/dof={reduced_chi2:.2f}')
     
     plt.xlabel('tan²θ', fontsize=14)
     plt.ylabel('Δm² (eV²)', fontsize=14)
