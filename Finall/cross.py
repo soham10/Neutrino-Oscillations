@@ -33,7 +33,6 @@ def rho_NC_mu():
     return 1.0126
 
 def kappa_mu(T):
-    # Use the constant and the I(T) from above for muon scattering
     x = np.sqrt(1 + 2*m_e/T)
     I_T = (1/6) * (1/3 + (3 - x**2) * (1/(2*x)) * np.log((x+1)/(x-1)) - 1)
     kappa = 0.9970 - 0.00037 * I_T + 0.0025

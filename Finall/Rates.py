@@ -17,7 +17,7 @@ R_earth = 1.496e11 * eV_to_1_by_m  # 1 AU in eV^-1
 # SK settings
 fiducial_mass = 1e9 # g
 N_e_tgt = 10*fiducial_mass*N_A/18  # number of target electrons
-phi_B0 = 5.25e6  # cm^-2 s^-1, https://arxiv.org/pdf/hep-ex/0508053
+phi_B0 = 5.25e6  # cm^-2 s^-1
 phi_hep = 7.88e3  # cm^-2 s^-1
 
 # Load detector-corrected cross sections σ(E_ν, Te)
