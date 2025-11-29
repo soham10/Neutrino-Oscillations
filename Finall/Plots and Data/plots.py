@@ -11,8 +11,8 @@ plt.rcParams['axes.labelsize'] = 14
 plt.rcParams['axes.titlesize'] = 16
 
 # Load chi-squared data from CSV
-data = pd.read_csv('chi2_results0.1.csv')
-beta = 0.1
+data = pd.read_csv('Plots and Data/chi2_results_beta_0.0.csv')
+beta = 0.0
 # Get unique values for grid dimensions
 dm2_unique = np.sort(data['dm2'].unique())
 tan2theta_unique = np.sort(data['tan2theta'].unique())

@@ -24,8 +24,8 @@ MeVtoeV=1.e6
 
 #####################
 ### Neutrino oscillation parameters
-#Th12Central=33.56*(np.pi)/180.0
-#SigTh12=0.088
+th12=33.56*(np.pi)/180.0
+SigTh12=0.088
 th13=8.46*(np.pi)/180.0
 th23=41.6*(np.pi)/180.0
 dmsq=7.5 * 10**(-5)* 10**(-12) ## in MeV^2
@@ -176,7 +176,7 @@ def  dGamdE2HFpm(A, B, E3, E2, m3, m2):
       E3**3) - 
       (A*B*m2**5*m3**5)/(64*E2**4*E3**4) - (3*A*B*m2**5*m3**3)/(32*E2**4*
       E3**2) - SigTh12
-      (A*B*m2**5*m3)/(8*E2**4) + (A*B*m2**5*m3**3)/(32*E2**3*E3**3) + (A*B*
+      (A*B*m2**5*m3)/(8*E2**4) + (A*B*m2**5*m3**3)/(32*E2**3*E3**3) + (A*B* # type: ignore
       m2**3*m3**5)/(32*E2**3*E3**3) + 
       (A*B*m2**5*m3)/(8*E2**3*E3) + (A*B*m2**3*m3**3)/(8*E2**3*E3) - 
       (3*A*B*m2**3*m3**5)/(32*E2**2*E3**4) - (9*A*B*m2**3*m3**3)/(16*E2**2*
@@ -350,7 +350,7 @@ EnuArr=np.logspace(np.log10(0.1),1.15,30)
 ###########
 ## Reading the 8B flux ###########
 B8fluxArr=[]
-B8data=np.array(np.loadtxt('Sun-nuclear-B8.dat'))
+B8data=np.array(np.loadtxt('lambda.csv', delimiter=','))
 B8flux=interp1d( 1.e-6* B8data[::,0] , 1.e6* B8data[::,-1], kind='linear' ) # (MeV^{-1} cm^{-2} s^{-1})
 
 

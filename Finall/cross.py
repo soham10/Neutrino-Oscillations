@@ -1,159 +1,233 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.integrate import quad, dblquad
-from scipy.interpolate import interp1d
+from scipy.integrate import dblquad, quad
 import pandas as pd
+import scipy.special as sp
 
-# -------------- Lambda (8B spectrum) --------------
-lambda_df = pd.read_csv('lambda.csv')
-lambda_interp = interp1d(lambda_df['energy'].values, lambda_df['lambda'].values, 
-                         bounds_error=False, fill_value=0.0)
+lambda_df = pd.read_csv('hep.csv')
+Enu_vals = lambda_df['energy'].values
 
 # ---- Constants and cross section functions ----
-G_F = 1.1663787e-23  # eV^2
+G_F = 1.1663787e-11  # MeV^-2
 m_e = 0.510998950    # MeV
+MeVsqtocmsq = (197.3*1e-13)**2  # Conversion factor MeV^-2 to cm^2
+fsc = 1/137.036  # Fine structure constant (alpha)
+rho_NC = 1.0126  # ±0.0016
+sin_2_W = 0.2317  # sin^2(theta_W)
 
-def rho_NC_e():
-    return 1.0126  # ±0.0016
-
-def kappa_e(T):
-    # T is the electron recoil kinetic energy
+def I(T):
+    """Radiative correction term I(T)"""
     x = np.sqrt(1 + 2*m_e/T)
-    I_T = (1/6) * (1/3 + (3 - x**2) * (1/(2*x)) * np.log((x+1)/(x-1)) - 1)
-    kappa = 0.9791 + 0.0097 * I_T + 0.0025
-    return kappa
+    return (1/6) * (1/3 + (3 - x**2) * (0.5*x*np.log((x+1)/(x-1)) - 1))
 
-def gL_e(T):
-    return rho_NC_e() * (0.5 - kappa_e(T) * 0.2317) - 1
 
-def gR_e(T):
-    return -rho_NC_e() * kappa_e(T) * 0.2317
-
-def rho_NC_mu():
-    return 1.0126
-
-def kappa_mu(T):
-    x = np.sqrt(1 + 2*m_e/T)
-    I_T = (1/6) * (1/3 + (3 - x**2) * (1/(2*x)) * np.log((x+1)/(x-1)) - 1)
-    kappa = 0.9970 - 0.00037 * I_T + 0.0025
-    return kappa
-
-def gL_mu(T):
-    return rho_NC_mu() * (0.5 - kappa_mu(T) * 0.2317)
-
-def gR_mu(T):
-    return -rho_NC_mu() * kappa_mu(T) * 0.2317
-
-def couplings_radiative(Te_MeV, is_nu_e):
-    """Couplings with radiative corrections"""
-    if is_nu_e:
-        gL = gL_e(Te_MeV)
-        gR = gR_e(Te_MeV)
+def kappa(T, flavor):
+    """Radiative correction term kappa"""
+    if flavor == 'e':
+        return 0.9791 + 0.0097 * I(T)
+    elif flavor == 'mu' or flavor == 'mu/tau':
+        return 0.9970 - 0.00037 * I(T)
     else:
-        gL = gL_mu(Te_MeV)
-        gR = gR_mu(Te_MeV)
-    return gL, gR
+        raise ValueError("flavor must be 'e' or 'mu'/'mu/tau'")
 
-def dsigma_dTe(Ev_MeV, Te_MeV, is_nu_e):
-    """Differential cross section with radiative corrections"""
-    gL, gR = couplings_radiative(Te_MeV, is_nu_e)
-    sigma0 = 88.06e-46  # cm^2
-    prefac = sigma0 / m_e
-    z = Te_MeV / Ev_MeV
-    val = prefac * (gL**2 + gR**2 * (1 - z)**2 - gL * gR * (m_e/Ev_MeV) * z)
-    return val
+
+def g_L(T, flavor):
+    """Left-handed coupling with radiative corrections"""
+    if flavor == 'e':
+        return rho_NC * (0.5 - kappa(T, flavor) * sin_2_W) - 1
+    elif flavor == 'mu' or flavor == 'mu/tau':
+        return rho_NC * (0.5 - kappa(T, flavor) * sin_2_W)
+    else:
+        raise ValueError("flavor must be 'e' or 'mu'/'mu/tau'")
+
+
+def g_R(T, flavor):
+    """Right-handed coupling with radiative corrections"""
+    return -rho_NC * kappa(T, flavor) * sin_2_W
+
+
+def fminus(z, q):
+    """QED correction term f_-"""
+    T = z * q
+    E = T + m_e
+    l = np.sqrt(E**2 - m_e**2)
+    beta = l / E
+    
+    term1 = (E/l * np.log((E + l)/m_e) - 1) * (2 * np.log(1 - z - m_e/(E + l)) - np.log(1 - z) - 0.5*np.log(z) - 5/12)
+    term2 = 0.5 * (-sp.spence(1 - z) + sp.spence(1 - beta)) - 0.5*np.log(1-z)**2 - (11/12 + z/2)*np.log(1-z)
+    term3 = z*(np.log(z) + 0.5*np.log(2*q/m_e)) - (31/18 + 1/12 * np.log(z))*beta - 11*z/12 + z**2/24
+    
+    return term1 + term2 + term3
+
+
+def fplus(z, q):
+    """QED correction term f_+"""
+    T = z * q
+    E = T + m_e
+    l = np.sqrt(E**2 - m_e**2)
+    beta = l / E
+    
+    term1 = (E/l * np.log((E + l)/m_e) - 1) * ((1-z)**2 * (2*np.log(1 - z - m_e/(E + l)) - np.log(1 - z) - np.log(z)/2 - 2/3) - 0.5*(z**2 * np.log(z) + 1 - z))
+    term2 = -0.5*(1-z)**2 * (np.log(1-z)**2 + beta * (-sp.spence(1-(1-z)) - np.log(z)*np.log(1-z)))
+    term3 = np.log(1-z) * (0.5*z**2 * np.log(z) + (1-z)/3 * (2*z - 0.5)) + 0.5*z**2 * sp.spence(1-(1-z)) - z*(1-2*z)/3 * np.log(z) - z*(1-z)/6
+    term4 = -beta/12 * (np.log(z) + (1-z)*(115 - 109*z)/6)
+    
+    return term1 + term2 + term3 + term4
+
+
+def fpm(z, q):
+    """QED correction term f_+-"""
+    T = z * q
+    E = T + m_e
+    l = np.sqrt(E**2 - m_e**2)
+    
+    return 2 * (E/l * np.log((E+l)/m_e) - 1) * np.log(1 - z - m_e/(E+l))
+
+
+def dSigma_dT_corrections(flavor, E_nu, T_e):
+    """
+    Differential cross section with QED and radiative corrections
+    Based on arXiv:astro-ph/9502003
+    
+    Parameters:
+        flavor: 'e' for electron neutrino, 'mu' for muon/tau neutrino
+        E_nu: Incident neutrino energy (MeV)
+        T_e: Electron recoil kinetic energy (MeV)
+    
+    Returns:
+        Cross section in cm^2/MeV
+    """
+    max_z = (2 * E_nu) / (2 * E_nu + m_e)
+    z_val = T_e / E_nu
+    
+    if z_val >= max_z or z_val <= 0:
+        return 0.0
+    
+    z_val = np.clip(z_val, 1e-10, max_z - 1e-10)
+    
+    # Get couplings
+    gL = g_L(T_e, flavor)
+    gR = g_R(T_e, flavor)
+
+    # Calculate QED corrections
+    f_minus = fminus(z_val, E_nu)
+    f_plus = fplus(z_val, E_nu)
+    f_pm = fpm(z_val, E_nu)
+
+    # Differential cross section with corrections
+    prefactor = 2 * G_F**2 * m_e / np.pi
+
+    term1 = gL**2 * (1 + fsc/np.pi * f_minus)
+    term2 = gR**2 * (1 - z_val)**2 + gR**2*fsc/np.pi * f_plus
+    term3 = -gR * gL * m_e * z_val / E_nu * (1 + fsc/np.pi * f_pm)
+
+    xsc = prefactor * (term1 + term2 + term3) * MeVsqtocmsq
+
+    return xsc
+
+
+def dsigma_dT(Ev_MeV, T_MeV, is_nu_e): 
+    """Differential cross section with radiative corrections (cm^2 / MeV)"""
+    flavor = 'e' if is_nu_e else 'mu'
+    return dSigma_dT_corrections(flavor, Ev_MeV, T_MeV)
+
 
 def TMax(Enu):
-    """Maximum kinetic energy that electron can have for given neutrino energy"""
-    return Enu / (1 + m_e/(2*Enu))
+    """Maximum kinetic energy the electron can have for a given neutrino energy"""
+    return 2*Enu**2 / (2*Enu + m_e)
 
-# SK detector response function
-def s_SK(T_prime):
+# SK detector response
+
+def s_SK(T):
     """Width of the Gaussian response function in MeV"""
-    return -0.0839 + 0.349 * np.sqrt(T_prime) + 0.0397 * T_prime
+    return -0.05525 + 0.3162 * np.sqrt(T + m_e) + 0.04572 * (T + m_e)
 
-def R_SK(T, T_prime):
-    s = s_SK(T_prime)
-    if s <= 0:
-        return 0.0
-    return (1 / (np.sqrt(2*np.pi) * s)) * np.exp(-0.5 * ((T - T_prime) / s)**2)
 
-# Function to compute the total convolved cross section for a given neutrino energy
-def compute_total_convolved_sigma(Enu, T_center, bin_width, is_nu_e=True):
+def R_SK(Te_meas, T_true):
+    """Detector response function: probability of measuring Te_meas given true energy T_true"""
+    s = s_SK(T_true)
+    norm = 1 / (np.sqrt(2 * np.pi) * s)
+    return norm * np.exp(-0.5 * ((Te_meas - T_true) / s) ** 2)
+
+def compute_convolved_cross_section(Enu, Te_meas_center, bin_width, is_nu_e):
     """
-    Compute total detector-convolved cross section for fixed Enu and Te bin
-    T_center: center of the Te bin
-    bin_width: width of Te bin (default 0.5 MeV)
+    Compute detector-convolved cross section with double integration
+    Implements: σ(E_ν) = ∫[T'_min to T'_max] dT' ∫[0 to T_max] R(T, T') * (dσ/dT')(E_ν, T') dT
+    
+    Parameters:
+        Enu: Neutrino energy (MeV)
+        Te_meas_center: Center of measured Te bin (MeV)
+        bin_width: Width of Te bin (MeV)
+        is_nu_e: Boolean, True for electron neutrino, False for muon/tau
+    
+    Returns:
+        Convolved cross section (cm^2)
     """
-    T_min = T_center - bin_width/2  
-    T_max = T_center + bin_width/2 
+    T_max = TMax(Enu)
     
-    # Maximum kinetic energy that electron can have (kinematic limit)
-    T_prime_max = TMax(Enu)
+    # Integration bounds for T' (true energy)
+    Tprime_min = Te_meas_center - bin_width/2
+    Tprime_max = Te_meas_center + bin_width/2
     
-    if T_prime_max <= 0 or T_max <= T_min:
-        return 0.0
+    def outer_integrand(Tprime):
+        """
+        Integrand for outer integral over T' (true energy)
+        Returns: ∫[0 to T_max] R(T, T') * (dσ/dT')(E_ν, T') dT
+        """
+        # Get the differential cross section at true energy T'
+        dsigma = dsigma_dT(Enu, Tprime, is_nu_e)
+        
+        def inner_integrand(T):
+            """
+            Integrand for inner integral over T (measured energy)
+            Returns: R(T, T') * (dσ/dT')(E_ν, T')
+            """
+            response = R_SK(T, Tprime)
+            return response
+        
+        # Inner integral: over measured energy T from 0 to T_max
+        inner_result, _ = quad(inner_integrand, 0, T_max, epsabs=1e-10, epsrel=1e-8)
+        return inner_result*dsigma
     
-    # Double integrand for the integration over T and T'
-    def double_integrand(T_prime, T):
-        if T_prime <= 0 or T_prime > T_prime_max:
-            return 0.0
-        dsigma_dT_prime = dsigma_dTe(Enu, T_prime, is_nu_e)
-        response = R_SK(T, T_prime)
-        return response * dsigma_dT_prime
-    
-    # Perform double integration: outer over T, inner over T'
-    result, _ = dblquad( # type: ignore
-        double_integrand,
-        T_min, T_max,  # T integration limits (Te bin)
-        lambda x: 0.0,     # T' lower limit
-        lambda x: T_prime_max  # T' upper limit (true energy)
-    )
+    # Outer integral: over true energy T' from T'_min to T'_max
+    result, _ = quad(outer_integrand, Tprime_min, Tprime_max, epsabs=1e-10, epsrel=1e-8)
     
     return result
 
 # ---------- Calculate convolved cross sections ----------
 output_total = []
 
-# Load Te bin centers from plot-data.csv
+# Load Te bin centers from plot-data.csv  
 plot_data = pd.read_csv("plot-data.csv")
-Te_bin_centers = plot_data['Recoil energy(MeV)'].values
-sigma_energies = plot_data['sigma_energy'].values
-
-# Use neutrino energies from lambda.csv file
-Enu_vals = lambda_df['energy'].values
+Te_bin_centers = plot_data['energy'].values
+bin_widths = plot_data['bin_width'].values
 
 print("Computing detector-convolved cross sections...")
-print(f"Using {len(Enu_vals)} neutrino energies from lambda.csv")
+print(f"Using {len(Enu_vals)} neutrino energies from hep.csv")
 print(f"Using {len(Te_bin_centers)} Te bins from plot-data.csv")
 
-for i_te, (Te_center, sigma_energy) in enumerate(zip(Te_bin_centers, sigma_energies)):
-    # Use 2*sigma_energy as the full bin width (±sigma_energy around center)
-    bin_width = 2.0 * sigma_energy
-    print(f"Processing Te bin {i_te+1}/{len(Te_bin_centers)}: Te = {Te_center} MeV, bin_width = {bin_width} MeV")
-    
+for (Te_center, bin_width) in zip(Te_bin_centers, bin_widths):
+    print(f"Processing Te = {Te_center} MeV")
+
     for Enu in Enu_vals:
-        sigma_e = compute_total_convolved_sigma(Enu, Te_center, bin_width=bin_width, is_nu_e=True)
-        sigma_x = compute_total_convolved_sigma(Enu, Te_center, bin_width=bin_width, is_nu_e=False)
+        sigma_e = compute_convolved_cross_section(Enu, Te_center, bin_width, is_nu_e=True)
+        sigma_x = compute_convolved_cross_section(Enu, Te_center, bin_width, is_nu_e=False)
         output_total.append([Enu, Te_center, sigma_e, sigma_x])
 
 output_total = np.array(output_total)
 
-# Convert to units of 10^-46 cm^2
-output_total[:, 2] *= 1e46
-output_total[:, 3] *= 1e46
-
 # Plot total cross section results
 plt.figure(figsize=(8, 6))
-for Te in Te_bin_centers[:5]:  # Plot first 5 Te bins as examples
+for Te in Te_bin_centers[20:23]:
     mask = output_total[:, 1] == Te
     if np.any(mask):
         plt.plot(output_total[mask, 0], output_total[mask, 2], 'o-', label=f"Te = {Te} MeV (e)")
 
 plt.xlabel("Neutrino Energy (MeV)")
-plt.ylabel("Cross Section (10^-46 cm^2)")
+plt.ylabel("Cross Section")
 plt.title("Detector-Convolved Cross Section vs E_nu for different Te bins")
 plt.legend()
+plt.yscale('log')
 plt.grid(True, alpha=0.3)
 plt.show()
 

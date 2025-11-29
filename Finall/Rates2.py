@@ -2,20 +2,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
-from scipy.linalg import expm
-from numba import njit
 
 # Constants
 G_F = 1.1663787e-23  # eV^2
-N_A = 6.02214076e23  # Avogadro's number
 eV_to_1_by_m = 5.068e6
 one_by_cm3_to_eV3 = (1.973*1e-5)**3
 R_sol = 6.9634e8 * eV_to_1_by_m  # solar radius in eV^-1
 R_earth = 1.496e11 * eV_to_1_by_m  # 1 AU in eV^-1
 
-# SK settings
-fiducial_mass = 22.5e9 # g
-N_e_tgt = 10*fiducial_mass*N_A/18  # number of target electrons
+# SK settings -
+fiducial_mass = 22.5e9 # g (22.5 kton)
+N_e_tgt = 7.521e33  # Target electron count as specified
 phi_B0 = 5.25e6  # cm^-2 s^-1
 phi_hep = 7.88e3  # cm^-2 s^-1
 
@@ -42,8 +39,8 @@ Te_bin_centers = np.unique(Te_vals_grid)
 print(f"Loaded cross sections for {len(E_nu_vals)} energies and {len(Te_bin_centers)} Te bins")
 
 # Create combined spectrum
-lambda_interp_B_on_grid = np.interp(E_nu_vals, lambda_E, lambda_val_B, left=0.0, right=0.0)
-lambda_interp_hep_on_grid = np.interp(E_nu_vals, hep_E, lambda_val_hep, left=0.0, right=0.0)
+lambda_interp_B_on_grid = np.interp(E_nu_vals, lambda_E, lambda_val_B, left=0.0, right=1e-7)
+lambda_interp_hep_on_grid = np.interp(E_nu_vals, hep_E, lambda_val_hep, left=0.0, right=1e-4)
 
 # Flux-weighted spectrum (not normalized)
 flux_spectrum = phi_B0 * lambda_interp_B_on_grid + phi_hep * lambda_interp_hep_on_grid
@@ -56,56 +53,8 @@ comb_df = pd.DataFrame({
     'lambda_hep': lambda_interp_hep_on_grid,
 })
 comb_df.to_csv('combined_spectrum.csv', index=False)
-# Couplings parameters for computing oscillations and matter potential
-@njit
-def N_e(r):
-    if r <= R_sol:
-        return 245*N_A*np.exp(-r*10.45/R_sol)*one_by_cm3_to_eV3
-    else:
-        return 0.0
-
-@njit
-def k(N, beta, tau):
-    return tau*(G_F*beta*N)** 2
-
-@njit
-def A(E, N, del_m2, theta):
-    return -del_m2*np.cos(2*theta)/(4*E) + G_F*N/np.sqrt(2)
-
-@njit
-def B(E, del_m2, theta):
-    return del_m2*np.sin(2*theta)/(4*E)
-
-def solar_solver(E, beta, tau, del_m2, theta, n_slabs=10000, r_i=0.0, r_f=1.0):
-    E = E * 1e6  # MeV to eV
-    dx = (r_f - r_i) * R_earth / n_slabs
-    r_vals = np.linspace(r_i, r_f, n_slabs)
-    psi = np.array([1.0, 0.0, 0.0])
-    Pee_profile = np.zeros(n_slabs)
-    for i in range(n_slabs):
-        r = r_vals[i]*R_earth
-        N = N_e(r)
-        k_r = k(N, beta, tau)
-        A_r = A(E, N, del_m2, theta)
-        B_E = B(E, del_m2, theta)
-        M = np.array([[0.0, 0.0, B_E],
-                      [0.0, k_r, -A_r],
-                      [-B_E, A_r, k_r]])
-        U = expm(-2 * M * dx)
-        psi = U @ psi
-        Pee_profile[i] = (psi[0] + 1)*0.5
-    return r_vals, Pee_profile
-
-def avg_Pee(E, beta, tau, del_m2, theta):
-    r_frac, Pee_profile = solar_solver(E, beta, tau, del_m2, theta)
-    mask = (r_frac == 1)
-    return np.mean(Pee_profile[mask])
-
-# Oscillation parameters
-beta = 0.0 # Turbulence Parameter
-tau = 10*eV_to_1_by_m*1000
-del_m2 = 7.1e-5  # eV2
-theta = np.arctan(np.sqrt(0.46))    # radians
+def avg_Pee():
+    return 1.0
 
 # Load Te values from plot-data.csv
 plot_data = pd.read_csv("plot-data.csv")
@@ -115,41 +64,48 @@ Te_values = plot_data['energy'].values
 print("Pre-computing oscillation probabilities...")
 Pee_values = np.zeros(len(E_nu_vals))
 for i, E_nu in enumerate(tqdm(E_nu_vals, desc="Computing Pee")):
-    Pee_values[i] = avg_Pee(E_nu, beta, tau, del_m2, theta)
+    Pee_values[i] = avg_Pee()
 
 print("Computing rates for each Te bin...")
+
+# Calculate energy bin width for Riemann sum integration
+dE_nu = 0.02  # MeV
 
 # Calculate rate for each Te bin
 results = []
 
-# Calculate energy bin width for integration
-dE_nu = 0.02  # MeV
-
+# For each T_e center, perform Riemann sum over all E_nu
 for Te_center in tqdm(Te_bin_centers, desc="Computing Te rates"):
-    total_rate_for_Te = 0.0
+    # Initialize sum for this T_e bin
+    riemann_sum = 0.0
     
-    # Sum over all neutrino energies
+    # Sum over all E_nu associated with this T_e center
     for i_E, E_nu in enumerate(E_nu_vals):
-        # Find the cross section for this (E_nu, Te_center) pair
+        # Find cross sections for this (E_nu, T_e) pair
         mask = (E_nu_vals_grid == E_nu) & (Te_vals_grid == Te_center)
         
         if np.any(mask):
+            # Extract cross sections
             sigma_e = sigma_e_grid[mask][0]
-            sigma_x = sigma_x_grid[mask][0] 
+            sigma_x = sigma_x_grid[mask][0]
             
-            # Get oscillation probability and flux spectrum value
+            # Get oscillation probability
             Pee_val = Pee_values[i_E]
-            flux_at_E = flux_spectrum[i_E]  # This is φ_B8 * λ_B8 + φ_hep * λ_hep (cm^-2 s^-1)
             
-            # Effective cross section after oscillations
+            # Get total flux * lambda at this energy
+            flux_at_E = flux_spectrum[i_E]
+            
+            # Effective cross section: sigma_e*P_ee + sigma_x*(1-P_ee)
             sigma_eff = sigma_e * Pee_val + sigma_x * (1 - Pee_val)
             
-            # Rate contribution: flux_spectrum(Eν) * σ_eff * N_tgt * dEν * time
-            # flux_spectrum is in cm^-2 s^-1 MeV^-1, sigma is in cm^2, N_tgt is number of electrons
-            rate_contrib = flux_at_E * sigma_eff * N_e_tgt * dE_nu
-            rate_contrib *= 24 * 3600  # Convert to per day
-            
-            total_rate_for_Te += rate_contrib
+            # Riemann sum element: flux * lambda * sigma_eff * dE
+            riemann_sum += flux_at_E * sigma_eff * dE_nu
+    
+    # Multiply by target electrons to get rate
+    total_rate_for_Te = riemann_sum * N_e_tgt
+    
+    # Convert s^-1 -> day^-1
+    total_rate_for_Te *= 24 * 3600
     
     results.append([Te_center, total_rate_for_Te])
 
@@ -157,14 +113,13 @@ for Te_center in tqdm(Te_bin_centers, desc="Computing Te rates"):
 rates_vs_Te = np.array(results)
 
 # Save results
-np.savetxt(f'theoretical_rate_vs_Te_SK.csv', rates_vs_Te, 
+np.savetxt(f'theoretical_rate_vs_Te_SK_MC.csv', rates_vs_Te, 
            delimiter=',', header='Te_MeV,EventRate_per_day_per_22.5kt_per_bin', comments='')
 
 # Load experimental data for comparison if available
 exp_data = np.loadtxt('plot-data.csv', delimiter=',', skiprows=1)
 exp_te = exp_data[:, 0]
 exp_rate = exp_data[:, 1]
-has_exp_data = True
 
 # Plot results
 plt.figure(figsize=(10, 6))
